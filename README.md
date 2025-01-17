@@ -1,4 +1,4 @@
-# Video Generation API
+# VidCraft
 
 ## Description
 This backend application is built using FastAPI and is designed to generate videos based on user-defined topics and backgrounds. It integrates multiple AI services for text generation, audio synthesis, image creation, and subtitle generation. The application handles various tasks, including cleaning text, formatting subtitles, and generating video files using FFmpeg.
