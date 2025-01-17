@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+google-generativeai
+python-dotenv
+huggingface-hub
+elevenlabs
+openai-whisper
+torch
+diffusers
+transformers
+requests
+pillow
