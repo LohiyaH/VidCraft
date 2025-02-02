@@ -27,6 +27,15 @@ This backend application is built using FastAPI and is designed to generate vide
    ```
 2. Access the API documentation at `http://localhost:8000/docs`.
 
+# Navigate to the frontend directory
+3. cd frontend
+
+# Install dependencies
+4. npm install
+
+# Start the development server
+5. npm run dev
+
 ## API Endpoints
 - **POST** `/api/generate-video`
   - **Request Body**:
