@@ -5,9 +5,8 @@ import google.generativeai as genai
 import os
 import subprocess
 from dotenv import load_dotenv
-from huggingface_hub import InferenceClient  # For image generation
+from huggingface_hub import InferenceClient  # For video generation
 from elevenlabs import ElevenLabs  # For text-to-speech
-from io import BytesIO  # For handling image bytes
 import re  # For text cleaning
 import whisper  # For subtitle generation
 from storage import Storage  # Import the Storage class
@@ -51,12 +50,12 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 if not ELEVENLABS_API_KEY:
     raise ValueError("ELEVENLABS_API_KEY is not set in the .env file")
 
-# Hugging Face InferenceClient for Stable Diffusion
+# Hugging Face InferenceClient for text-to-video background generation
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 if not HUGGINGFACE_API_KEY:
     raise ValueError("HUGGINGFACE_API_KEY is not set in the .env file")
 
-client = InferenceClient("stabilityai/stable-diffusion-xl-base-1.0", token=HUGGINGFACE_API_KEY)
+client = InferenceClient("cerspense/zeroscope_v2_576w", token=HUGGINGFACE_API_KEY)
 
 # Load Whisper model
 whisper_model = whisper.load_model("base")  # Use "small", "medium", or "large" for better accuracy
@@ -64,7 +63,7 @@ whisper_model = whisper.load_model("base")  # Use "small", "medium", or "large" 
 # Request models
 class GenerateVideoRequest(BaseModel):
     topic: constr(min_length=3, max_length=200)  # The topic of the video
-    background: constr(min_length=3, max_length=500)  # Description of the background for the image
+    background: constr(min_length=3, max_length=500)  # Description of the background video scene
 
 # Text cleaning function
 def clean_text(text):
@@ -126,6 +125,14 @@ def timestamp_to_seconds(timestamp: str) -> float:
     except Exception as e:
         raise ValueError(f"Invalid timestamp format: {timestamp}. Expected HH:MM:SS,ms.")
 
+
+def build_subtitle_filter(subtitle_path: str) -> str:
+    """
+    Build an FFmpeg filter string that burns in subtitles.
+    """
+    subtitle_path_escaped = subtitle_path.replace(":", "\\:")
+    return f"subtitles='{subtitle_path_escaped}':force_style='FontName=Arial,FontSize=24,PrimaryColour=&HFFFFFF&'"
+
 # Generate subtitles using Whisper
 def generate_subtitles(audio_file_path: str) -> str:
     """
@@ -181,17 +188,14 @@ async def generate_video(request: GenerateVideoRequest):
         audio_url = storage.save_file(audio_file_name, audio_bytes)
         print("Audio file saved:", audio_url)
 
-        # Step 3: Generate image using Hugging Face API
-        print("Generating image using Hugging Face API...")
-        image = client.text_to_image(request.background)  # Generate image based on background description
-        image_bytes = BytesIO()
-        image.save(image_bytes, format="PNG")
-        image_bytes = image_bytes.getvalue()
+        # Step 3: Generate background video using Hugging Face API
+        print("Generating background video using Hugging Face API...")
+        video_bytes = client.text_to_video(request.background)
 
-        # Save the image file using the Storage class
-        image_file_name = f"{uuid.uuid4()}.png"
-        image_url = storage.save_file(image_file_name, image_bytes)
-        print("Image file saved:", image_url)
+        # Save the background video using the Storage class
+        background_file_name = f"{uuid.uuid4()}.mp4"
+        background_url = storage.save_file(background_file_name, video_bytes)
+        print("Background video saved:", background_url)
 
         # Step 4: Generate subtitles using Whisper
         print("Generating subtitles using Whisper...")
@@ -214,16 +218,16 @@ async def generate_video(request: GenerateVideoRequest):
         subtitle_url = storage.save_file(subtitle_file_name, subtitles.encode("utf-8"))
         print("Subtitles file saved:", subtitle_url)
 
-        # Step 5: Download image and subtitle files locally
-        image_local_path = storage_dir / image_file_name
-        if os.path.exists(image_url):
-            image_local_path = Path(image_url)
+        # Step 5: Download background and subtitle files locally
+        background_local_path = storage_dir / background_file_name
+        if os.path.exists(background_url):
+            background_local_path = Path(background_url)
         else:
-            with open(image_local_path, "wb") as f:
-                response = requests.get(image_url, timeout=30)
+            with open(background_local_path, "wb") as f:
+                response = requests.get(background_url, timeout=30)
                 response.raise_for_status()
                 f.write(response.content)
-        print("Image file downloaded locally:", image_local_path)
+        print("Background video downloaded locally:", background_local_path)
 
         subtitle_local_path = storage_dir / subtitle_file_name
         if os.path.exists(subtitle_url):
@@ -245,16 +249,15 @@ async def generate_video(request: GenerateVideoRequest):
         print("Generating video using FFmpeg...")
         video_file_name = f"{uuid.uuid4()}.mp4"
         video_file_path = storage_dir / video_file_name
-
         # Convert paths to absolute paths and replace backslashes with forward slashes
-        image_local_path_abs = os.path.abspath(image_local_path).replace("\\", "/")
+        background_local_path_abs = os.path.abspath(background_local_path).replace("\\", "/")
         audio_local_path_abs = os.path.abspath(audio_local_path).replace("\\", "/")
         subtitle_local_path_abs = os.path.abspath(subtitle_local_path).replace("\\", "/")
         video_file_path_abs = os.path.abspath(video_file_path).replace("\\", "/")
 
         # Debugging: Print absolute paths
         print("Absolute paths:")
-        print("Image:", image_local_path_abs)
+        print("Background:", background_local_path_abs)
         print("Audio:", audio_local_path_abs)
         print("Subtitles:", subtitle_local_path_abs)
         print("Output video:", video_file_path_abs)
@@ -263,17 +266,16 @@ async def generate_video(request: GenerateVideoRequest):
         if not os.path.exists(subtitle_local_path_abs):
             raise HTTPException(status_code=500, detail=f"Subtitle file not found: {subtitle_local_path_abs}")
 
-        # Escape colons in the subtitle path
-        subtitle_path_escaped = subtitle_local_path_abs.replace(":", "\\:")
+        subtitle_filter = build_subtitle_filter(subtitle_local_path_abs)
 
         # FFmpeg command to combine image, audio, and subtitles
         command = [
             "ffmpeg",
             "-y",  # Overwrite output file without asking
-            "-loop", "1",  # Loop the image
-            "-i", image_local_path_abs,  # Input image (absolute path)
+            "-stream_loop", "-1",  # Loop the background video
+            "-i", background_local_path_abs,  # Input background video (absolute path)
             "-i", audio_local_path_abs,  # Input audio (absolute path)
-            "-vf", f"subtitles='{subtitle_path_escaped}':force_style='FontName=Arial,FontSize=24,PrimaryColour=&HFFFFFF&'",  # Add subtitles
+            "-vf", subtitle_filter,  # Add subtitles
             "-c:v", "libx264",  # Video codec
             "-t", str(video_duration),  # Duration of the video
             "-pix_fmt", "yuv420p",  # Pixel format
