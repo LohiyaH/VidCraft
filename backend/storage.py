@@ -7,7 +7,7 @@ load_dotenv()
 
 class Storage:
     def __init__(self):
-        self.local_storage_path = "storage"
+        self.local_storage_path = os.getenv("STORAGE_PATH", "storage")
         os.makedirs(self.local_storage_path, exist_ok=True)
 
         # Initialize AWS S3 client if credentials are provided

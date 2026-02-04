@@ -7,17 +7,19 @@ This backend application is built using FastAPI and is designed to generate vide
 1. Clone the repository:
    ```bash
    git clone https://github.com/LohiyaH/VidCraft
-   cd shorty
+   cd VidCraft
    ```
 2. Install the required dependencies:
    ```bash
    pip install -r backend/requirements.txt
    ```
-3. Set up environment variables in a `.env` file:
+3. Set up environment variables in a `.env` file (see `.env.example`):
    ```
    GEMINI_API_KEY=<your-gemini-api-key>
    ELEVENLABS_API_KEY=<your-elevenlabs-api-key>
    HUGGINGFACE_API_KEY=<your-huggingface-api-key>
+   STORAGE_PATH=storage
+   ALLOWED_ORIGINS=http://localhost:3000
    ```
 
 ## Usage
@@ -33,8 +35,13 @@ This backend application is built using FastAPI and is designed to generate vide
 # Install dependencies
 4. npm install
 
+5. Create a frontend `.env.local` file with:
+   ```
+   NEXT_PUBLIC_API_URL=http://localhost:8000
+   ```
+
 # Start the development server
-5. npm run dev
+6. npm run dev
 
 ## API Endpoints
 - **POST** `/api/generate-video`
