@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, constr
 import google.generativeai as genai
 import os
 import subprocess
@@ -24,12 +24,13 @@ load_dotenv()
 app = FastAPI()
 
 # Add CORS middleware
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "*")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (replace with your frontend URL in production)
+    allow_origins=["*"] if allowed_origins == "*" else [origin.strip() for origin in allowed_origins.split(",")],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Initialize the Storage class
@@ -62,8 +63,8 @@ whisper_model = whisper.load_model("base")  # Use "small", "medium", or "large" 
 
 # Request models
 class GenerateVideoRequest(BaseModel):
-    topic: str  # The topic of the video
-    background: str  # Description of the background for the image
+    topic: constr(min_length=3, max_length=200)  # The topic of the video
+    background: constr(min_length=3, max_length=500)  # Description of the background for the image
 
 # Text cleaning function
 def clean_text(text):
@@ -194,36 +195,44 @@ async def generate_video(request: GenerateVideoRequest):
 
         # Step 4: Generate subtitles using Whisper
         print("Generating subtitles using Whisper...")
-        subtitles = generate_subtitles(audio_url)
+        storage_dir = Path(os.getenv("STORAGE_PATH", "storage")).resolve()
+        storage_dir.mkdir(parents=True, exist_ok=True)
+
+        audio_local_path = storage_dir / audio_file_name
+        if os.path.exists(audio_url):
+            audio_local_path = Path(audio_url)
+        else:
+            with open(audio_local_path, "wb") as f:
+                response = requests.get(audio_url, timeout=30)
+                response.raise_for_status()
+                f.write(response.content)
+
+        subtitles = generate_subtitles(str(audio_local_path))
 
         # Save the subtitles using the Storage class
         subtitle_file_name = f"{uuid.uuid4()}.srt"
         subtitle_url = storage.save_file(subtitle_file_name, subtitles.encode("utf-8"))
         print("Subtitles file saved:", subtitle_url)
 
-        # Step 5: Download all files locally
-        storage_dir = Path("D:/projects_webd/shorty/backend/storage")  # Absolute path to storage folder
-        storage_dir.mkdir(exist_ok=True)  # Ensure the storage directory exists
-
-        # Download image file locally
+        # Step 5: Download image and subtitle files locally
         image_local_path = storage_dir / image_file_name
-        with open(image_local_path, "wb") as f:
-            response = requests.get(image_url)
-            f.write(response.content)
+        if os.path.exists(image_url):
+            image_local_path = Path(image_url)
+        else:
+            with open(image_local_path, "wb") as f:
+                response = requests.get(image_url, timeout=30)
+                response.raise_for_status()
+                f.write(response.content)
         print("Image file downloaded locally:", image_local_path)
 
-        # Download audio file locally
-        audio_local_path = storage_dir / audio_file_name
-        with open(audio_local_path, "wb") as f:
-            response = requests.get(audio_url)
-            f.write(response.content)
-        print("Audio file downloaded locally:", audio_local_path)
-
-        # Download subtitle file locally
         subtitle_local_path = storage_dir / subtitle_file_name
-        with open(subtitle_local_path, "wb") as f:
-            response = requests.get(subtitle_url)
-            f.write(response.content)
+        if os.path.exists(subtitle_url):
+            subtitle_local_path = Path(subtitle_url)
+        else:
+            with open(subtitle_local_path, "wb") as f:
+                response = requests.get(subtitle_url, timeout=30)
+                response.raise_for_status()
+                f.write(response.content)
         print("Subtitles file downloaded locally:", subtitle_local_path)
 
         # Step 6: Determine video duration from subtitles
@@ -303,4 +312,4 @@ async def generate_video(request: GenerateVideoRequest):
         # Log the full traceback
         error_message = f"Unexpected error: {str(e)}\n{traceback.format_exc()}"
         print(error_message)
-        raise HTTPException(status_code=500, detail=error_message)
+        raise HTTPException(status_code=500, detail="Video generation failed. Please try again later.")
